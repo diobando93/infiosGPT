@@ -145,6 +145,16 @@ ollama run mistral
 python index.py
 ```
 
+## 9 for run api 
+```bash
+uvicorn index:app --reload
+```
+
+## 10 for run html from ubuntu wsl into browser example
+```bash
+file://wsl.localhost/Ubuntu/home/iobando/development/agentAI/frontend/index.html
+```
+
 🎉 You’re running your app **fully offline** with a **local LLM** and a **PostgreSQL DB**!
 
 ---
