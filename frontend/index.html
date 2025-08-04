@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InfiosGPT - Consultas BD</title>
+    <title>InfiosGPT - Database Queries</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -28,43 +28,43 @@
         <div class="main-content">
             <!-- Header Section -->
             <div class="content-header">
-                <h2>Consultas Inteligentes</h2>
-                <p>Haz preguntas a tu base de datos en lenguaje natural</p>
+                <h2>Intelligent Queries</h2>
+                <p>Ask questions to your database in natural language</p>
             </div>
 
             <!-- Status Section -->
             <div class="status-section">
                 <div class="status-indicator">
                     <div class="status-dot" id="statusDot"></div>
-                    <span id="statusText">Verificando conexión...</span>
+                    <span id="statusText">Checking connection...</span>
                 </div>
-                <button class="btn-check" onclick="checkConnection()">🔄 Verificar</button>
+                <button class="btn-check" onclick="checkConnection()">🔄 Check</button>
             </div>
 
             <!-- Query Section -->
             <div class="query-section">
                 <div class="form-group">
-                    <label for="questionInput">💬 Escribe tu consulta:</label>
+                    <label for="questionInput">💬 Write your query:</label>
                     <textarea 
                         id="questionInput" 
                         class="query-input" 
-                        placeholder="Ejemplo: ¿Cuántas órdenes hay con fecha 1996-07-04?"
+                        placeholder="Example: How many orders are there with date 1996-07-04?"
                     ></textarea>
                     
                     <div class="button-group">
                         <button class="btn btn-primary" id="sendBtn" onclick="sendQuery()">
                             <span id="sendIcon">🚀</span>
-                            <span id="sendText">Ejecutar Consulta</span>
+                            <span id="sendText">Execute Query</span>
                         </button>
-                        <button class="btn btn-secondary" onclick="clearAll()">🗑️ Limpiar</button>
+                        <button class="btn btn-secondary" onclick="clearAll()">🗑️ Clear</button>
                     </div>
                 </div>
 
                 <div class="response-section">
                     <div class="form-group">
-                        <label>📋 Resultado:</label>
+                        <label>📋 Result:</label>
                         <div id="responseBox" class="response-box">
-                            Aquí aparecerá el resultado de tu consulta...
+                            The result of your query will appear here...
                         </div>
                     </div>
                 </div>
@@ -76,23 +76,23 @@
             <!-- Examples Section -->
             <div class="sidebar-section">
                 <div class="sidebar-header">
-                    💡 Ejemplos de Consultas
+                    💡 Query Examples
                 </div>
                 <div class="sidebar-content">
-                    <div class="example-item" onclick="setExample('¿Cuántas órdenes hay en total?')">
-                        ¿Cuántas órdenes hay en total?
+                    <div class="example-item" onclick="setExample('How many orders are there in total?')">
+                        How many orders are there in total?
                     </div>
-                    <div class="example-item" onclick="setExample('¿Qué órdenes tienen fecha 1996-07-04?')">
-                        ¿Qué órdenes tienen fecha 1996-07-04?
+                    <div class="example-item" onclick="setExample('What orders have date 1996-07-04?')">
+                        What orders have date 1996-07-04?
                     </div>
-                    <div class="example-item" onclick="setExample('Muéstrame los primeros 5 productos')">
-                        Muéstrame los primeros 5 productos
+                    <div class="example-item" onclick="setExample('Show me the first 5 products')">
+                        Show me the first 5 products
                     </div>
-                    <div class="example-item" onclick="setExample('¿Cuál es el total de la orden 10248?')">
-                        ¿Cuál es el total de la orden 10248?
+                    <div class="example-item" onclick="setExample('What is the total of order 10248?')">
+                        What is the total of order 10248?
                     </div>
-                    <div class="example-item" onclick="setExample('Lista los empleados por ciudad')">
-                        Lista los empleados por ciudad
+                    <div class="example-item" onclick="setExample('List employees by city')">
+                        List employees by city
                     </div>
                 </div>
             </div>
@@ -100,14 +100,14 @@
             <!-- Tips Section -->
             <div class="sidebar-section">
                 <div class="sidebar-header">
-                    📝 Consejos Rápidos
+                    📝 Quick Tips
                 </div>
                 <div class="sidebar-content">
                     <ul class="tips-list">
-                        <li>Sé específico en tus preguntas</li>
-                        <li>Menciona fechas exactas cuando sea posible</li>
-                        <li>Limita resultados para consultas más rápidas</li>
-                        <li>Usa nombres de tablas conocidos</li>
+                        <li>Be specific in your questions</li>
+                        <li>Mention exact dates when possible</li>
+                        <li>Limit results for faster queries</li>
+                        <li>Use known table names</li>
                     </ul>
                 </div>
             </div>

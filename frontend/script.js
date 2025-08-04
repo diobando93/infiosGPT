@@ -27,7 +27,7 @@ async function checkConnection() {
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
     
-    statusText.textContent = 'Verificando...';
+    statusText.textContent = 'Checking...';
     statusDot.className = 'status-dot';
     
     try {
@@ -36,15 +36,15 @@ async function checkConnection() {
         
         if (response.ok && data.status === 'ok') {
             statusDot.className = 'status-dot connected';
-            statusText.textContent = `✅ Conectado - DB: ${data.database}, LLM: ${data.llm_model}`;
+            statusText.textContent = `✅ Connected - DB: ${data.database}, LLM: ${data.llm_model}`;
         } else {
             statusDot.className = 'status-dot';
-            statusText.textContent = '❌ API responde pero hay problemas internos';
+            statusText.textContent = '❌ API responds but has internal issues';
         }
     } catch (error) {
         statusDot.className = 'status-dot';
-        statusText.textContent = '❌ No se puede conectar con la API';
-        console.error('Error de conexión:', error);
+        statusText.textContent = '❌ Cannot connect to API';
+        console.error('Connection error:', error);
     }
 }
 
@@ -61,7 +61,7 @@ async function sendQuery() {
     const question = questionInput.value.trim();
     
     if (!question) {
-        alert('Por favor, escribe una consulta');
+        alert('Please write a query');
         return;
     }
     
@@ -93,7 +93,7 @@ async function sendQuery() {
         
     } catch (error) {
         showConnectionError(responseBox, error.message);
-        console.error('Error en la consulta:', error);
+        console.error('Query error:', error);
     } finally {
         // Limpiar progreso y restaurar botón
         clearInterval(progressInterval);
@@ -108,11 +108,11 @@ function updateButtonState(btn, icon, text, isLoading) {
     if (isLoading) {
         btn.disabled = true;
         icon.innerHTML = '<div class="spinner"></div>';
-        text.textContent = 'Procesando...';
+        text.textContent = 'Processing...';
     } else {
         btn.disabled = false;
         icon.textContent = '🚀';
-        text.textContent = 'Ejecutar Consulta';
+        text.textContent = 'Execute Query';
     }
 }
 
@@ -123,10 +123,10 @@ function showLoadingProgress(responseBox) {
     responseBox.className = 'response-box loading';
     
     const loadingMessages = [
-        '🔄 Analizando tu pregunta...',
-        '🧠 Generando consulta SQL...',
-        '📊 Ejecutando en la base de datos...',
-        '✨ Procesando resultados...'
+        '🔄 Analyzing your question...',
+        '🧠 Generating SQL query...',
+        '📊 Executing on database...',
+        '✨ Processing results...'
     ];
     
     let messageIndex = 0;
@@ -143,7 +143,7 @@ function showLoadingProgress(responseBox) {
  */
 function showSuccessResponse(responseBox, data) {
     responseBox.className = 'response-box success';
-    responseBox.textContent = `Consulta: ${data.pregunta}\n\n✅ Resultado:\n${data.respuesta}`;
+    responseBox.textContent = `Query: ${data.pregunta}\n\n✅ Result:\n${data.respuesta}`;
 }
 
 /**
@@ -159,7 +159,7 @@ function showErrorResponse(responseBox, errorDetail) {
  */
 function showConnectionError(responseBox, errorMessage) {
     responseBox.className = 'response-box error';
-    responseBox.textContent = `❌ Error de conexión: ${errorMessage}\n\nVerifica que la API esté ejecutándose en ${API_URL}`;
+    responseBox.textContent = `❌ Connection error: ${errorMessage}\n\nVerify that the API is running on ${API_URL}`;
 }
 
 /**
@@ -180,7 +180,7 @@ function clearAll() {
     
     questionInput.value = '';
     responseBox.className = 'response-box';
-    responseBox.textContent = 'Aquí aparecerá el resultado de tu consulta...';
+    responseBox.textContent = 'The result of your query will appear here...';
     
     questionInput.focus();
 }
