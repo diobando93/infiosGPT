@@ -60,7 +60,44 @@ class SQLAgentConfig:
             self.db = SQLDatabase.from_uri(DB_URI)
             
             # Modelo LLM
-            self.llm = Ollama(model="mistral")
+            """
+            self.llm = Ollama(
+                model="mistral",
+                temperature=0,  # Más determinístico, menos "creatividad"
+                num_predict=200,  # Limita tokens de salida
+                top_k=10,  # Reduce opciones de tokens
+                top_p=0.3,  # Más enfocado
+                repeat_penalty=1.1,
+                timeout=60  # Timeout de 60 segundos
+          )
+          
+            
+            self.llm = Ollama(
+                model="deepseek-coder:33b", 
+                 temperature=0.1,
+                num_predict=300
+
+            )
+            self.llm = Ollama(
+                model="deepseek-coder:33b",
+                base_url="https://de60a716808f.ngrok-free.app",  # Tu URL de ngrok
+                temperature=0.1,
+                num_predict=300,
+                timeout=120,
+                # Agregar headers específicos para ngrok si es necesario
+                headers={
+                    "Content-Type": "application/json",
+                    "ngrok-skip-browser-warning": "true"
+                }
+            )
+            
+"""
+            self.llm = Ollama(
+                model="deepseek-coder:33b", 
+                temperature=0.1,
+                num_predict=300,
+                timeout=120,
+            )
             
             # Toolkit y agente
             toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
