@@ -122,7 +122,9 @@ class SQLAgentConfig:
 sql_agent = SQLAgentConfig()
 
 
-# Después de crear la app FastAPI, agregar:
+app.mount("/css", StaticFiles(directory="frontend/css"), name="css")
+app.mount("/js", StaticFiles(directory="frontend/js"), name="js")
+app.mount("/assets", StaticFiles(directory="frontend/assets"), name="assets")
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 # Agregar endpoint para servir el HTML principal
