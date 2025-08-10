@@ -8,6 +8,12 @@ from langchain_community.llms import Ollama
 import uvicorn
 from typing import Optional
 import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+
+
+
 
 # Inicializar FastAPI
 app = FastAPI(
@@ -96,7 +102,7 @@ class SQLAgentConfig:
                 model="deepseek-coder:33b", 
                 temperature=0.1,
                 num_predict=300,
-                timeout=120,
+                timeout=300,
             )
             
             # Toolkit y agente
@@ -115,17 +121,21 @@ class SQLAgentConfig:
 # Instancia global del agente
 sql_agent = SQLAgentConfig()
 
+
+# Después de crear la app FastAPI, agregar:
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+# Agregar endpoint para servir el HTML principal
 @app.get("/")
-async def root():
-    """Endpoint de bienvenida"""
-    return {
-        "message": "API SQL Agent está funcionando",
-        "endpoints": {
-            "consulta": "/query (POST)",
-            "salud": "/health (GET)",
-            "docs": "/docs"
-        }
-    }
+async def read_index():
+    return FileResponse('frontend/index.html')
+
+# Si tienes otros archivos HTML
+@app.get("/app")
+async def read_app():
+    return FileResponse('frontend/index.html')
+
+
 
 @app.get("/health")
 async def health_check():
