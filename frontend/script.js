@@ -1,5 +1,6 @@
 // Configuración de la API
-const API_URL = 'http://0.0.0.0:8000';
+//const API_URL = 'http://localhost:8000';
+const API_URL = 'http://35.94.150.51:8000';
 
 // Inicialización
 window.onload = function() {
