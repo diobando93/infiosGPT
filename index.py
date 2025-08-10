@@ -27,7 +27,7 @@ app.add_middleware(
 
 # Configuración de base de datos desde variables de entorno o valores por defecto
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123456") 
+DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123") 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5499")
 DB_NAME = os.getenv("DB_NAME", "northwind")
