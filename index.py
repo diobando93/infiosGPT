@@ -122,12 +122,10 @@ class SQLAgentConfig:
 sql_agent = SQLAgentConfig()
 
 
-app.mount("/css", StaticFiles(directory="frontend/css"), name="css")
-app.mount("/js", StaticFiles(directory="frontend/js"), name="js")
-app.mount("/assets", StaticFiles(directory="frontend/assets"), name="assets")
+# Montar directorio frontend para archivos estáticos
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
-# Agregar endpoint para servir el HTML principal
+# Servir el index.html desde la raíz  
 @app.get("/")
 async def read_index():
     return FileResponse('frontend/index.html')
