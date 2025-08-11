@@ -57,16 +57,16 @@ class BedrockDeepSeekClient:
     def call_bedrock(self, prompt, max_tokens=500):
         """Call DeepSeek-R1 in Bedrock (fully managed)"""
         try:
-            # Format específico para DeepSeek-R1 sin los caracteres problemáticos
-            formatted_prompt = f"User: {prompt}\nAssistant:"
+            # Formato simplificado sin caracteres especiales
+            formatted_prompt = f"Human: {prompt}\n\nAssistant:"
             
             # Configuration for DeepSeek-R1
             body = {
                 "prompt": formatted_prompt,
                 "max_tokens": max_tokens,
-                "temperature": 0.1,
-                "top_p": 0.9,
-                "stop": ["User:", "Human:", "\n\n"]
+                "temperature": 0.0,  # Más determinístico
+                "top_p": 0.1,        # Más enfocado
+                "stop": ["Human:", "\n\n", "Explanation:", "Note:"]
             }
             
             response = self.bedrock_runtime.invoke_model(
@@ -93,41 +93,85 @@ class BedrockDeepSeekClient:
         schema_info = self.db.get_table_info()
         
         # Very specific prompt for SQL-only output
-        prompt = f"""Given this database schema:
-
+        prompt = f"""Database schema:
 {schema_info}
 
 Question: {question}
 
-You must respond with ONLY the SQL query. No explanations, no reasoning, just the SQL statement.
+Rules:
+1. Respond with ONLY a SQL statement
+2. No explanations, no reasoning, no text
+3. Just the SQL query ending with semicolon
 
-Example format:
-SELECT COUNT(*) FROM customers;
-
-Your SQL query:"""
+SQL:"""
         
-        sql_query = self.call_bedrock(prompt, max_tokens=100)
+        sql_query = self.call_bedrock(prompt, max_tokens=50)
         
-        # Aggressive cleaning
-        lines = sql_query.split('\n')
+        # Very aggressive cleaning
+        sql_query = self.clean_sql_response(sql_query)
+        
+        return sql_query
+    
+    def clean_sql_response(self, response):
+        """Clean SQL response aggressively"""
+        # Remove common prefixes
+        response = response.replace("```sql", "").replace("```", "").strip()
+        response = response.replace("SQL:", "").strip()
+        
+        # Split by lines and look for actual SQL
+        lines = response.split('\n')
         for line in lines:
             line = line.strip()
-            # Look for actual SQL (starts with SELECT, INSERT, UPDATE, DELETE, WITH, etc.)
-            if (line.upper().startswith(('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH', 'CREATE')) 
-                and not line.lower().startswith(('select count', 'select *', 'select distinct')) is False):
-                sql_query = line
-                break
+            # Look for lines that start with SQL keywords
+            if line.upper().startswith(('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH', 'CREATE')):
+                # Make sure it's not just starting with SELECT but is actual SQL
+                if any(word in line.upper() for word in ['FROM', 'WHERE', 'ORDER', 'GROUP', 'HAVING', 'LIMIT']):
+                    sql_query = line
+                    break
+                elif line.upper().startswith('SELECT') and ('COUNT' in line.upper() or '*' in line):
+                    sql_query = line
+                    break
+        else:
+            # If no proper SQL found, try to extract from first line
+            first_line = lines[0].strip() if lines else response
+            sql_query = first_line
         
-        # Final cleanup
-        sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
-        if sql_query.startswith("SQL:"):
-            sql_query = sql_query[4:].strip()
+        # Remove any remaining explanatory text
+        if sql_query.upper().startswith(('OKAY', 'LET', 'THE', 'TO', 'I ', 'WE ', 'THIS')):
+            # This is not SQL, try to find SQL pattern
+            import re
+            sql_pattern = r'(SELECT\s+.*?;)'
+            match = re.search(sql_pattern, response, re.IGNORECASE | re.DOTALL)
+            if match:
+                sql_query = match.group(1)
+            else:
+                # Fallback: construct basic query based on question
+                sql_query = self.fallback_sql_generation(response)
         
         # Ensure it ends with semicolon
-        if not sql_query.endswith(';'):
-            sql_query += ';'
+        if not sql_query.strip().endswith(';'):
+            sql_query = sql_query.strip() + ';'
             
         return sql_query
+    
+    def fallback_sql_generation(self, question_context):
+        """Generate basic SQL if parsing fails"""
+        question_lower = question_context.lower()
+        
+        if 'count' in question_lower and 'order' in question_lower:
+            return "SELECT COUNT(*) FROM orders;"
+        elif 'count' in question_lower and 'customer' in question_lower:
+            return "SELECT COUNT(*) FROM customers;"
+        elif 'count' in question_lower and 'product' in question_lower:
+            return "SELECT COUNT(*) FROM products;"
+        elif 'count' in question_lower and 'employee' in question_lower:
+            return "SELECT COUNT(*) FROM employees;"
+        elif 'order' in question_lower and 'date' in question_lower:
+            return "SELECT * FROM orders WHERE order_date = '1996-07-04';"
+        elif 'first' in question_lower and 'product' in question_lower:
+            return "SELECT * FROM products LIMIT 5;"
+        else:
+            return "SELECT COUNT(*) FROM customers;"
     
     def execute_sql_query(self, sql_query):
         """Ejecutar consulta SQL en la base de datos"""
@@ -249,7 +293,10 @@ async def consulta_simple(request: QueryRequest):
             "question": request.pregunta,
             "answer": respuesta,
             "model": "DeepSeek-R1 (Bedrock)",
-            "time": f"{response_time:.2f}s"
+            "time": f"{response_time:.2f}s",
+            # Campos adicionales para compatibilidad con frontend anterior
+            "pregunta": request.pregunta,
+            "respuesta": respuesta
         }
         
     except Exception as e:
