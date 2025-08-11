@@ -55,18 +55,18 @@ class BedrockDeepSeekClient:
         self.db = SQLDatabase.from_uri(DB_URI)
     
     def call_bedrock(self, prompt, max_tokens=500):
-        """Llamar a DeepSeek-R1 en Bedrock (completamente gestionado)"""
+        """Call DeepSeek-R1 in Bedrock (fully managed)"""
         try:
-            # Formato específico para DeepSeek-R1
-            formatted_prompt = f"<｜begin▁of▁sentence｜><｜User｜>{prompt}<｜Assistant｜><think>\n"
+            # Format específico para DeepSeek-R1 sin los caracteres problemáticos
+            formatted_prompt = f"User: {prompt}\nAssistant:"
             
-            # Configuración para DeepSeek-R1
+            # Configuration for DeepSeek-R1
             body = {
                 "prompt": formatted_prompt,
                 "max_tokens": max_tokens,
                 "temperature": 0.1,
                 "top_p": 0.9,
-                "stop": ["<｜User｜>", "<｜end▁of▁sentence｜>"]
+                "stop": ["User:", "Human:", "\n\n"]
             }
             
             response = self.bedrock_runtime.invoke_model(
@@ -77,14 +77,14 @@ class BedrockDeepSeekClient:
             )
             
             result = json.loads(response['body'].read())
-            # DeepSeek-R1 devuelve en formato 'choices'
+            # DeepSeek-R1 returns in 'choices' format
             if 'choices' in result and len(result['choices']) > 0:
                 return result['choices'][0].get('text', '').strip()
             else:
                 return result.get('completion', str(result)).strip()
                 
         except Exception as e:
-            print(f"Error en Bedrock: {str(e)}")
+            print(f"Error in Bedrock: {str(e)}")
             return f"Error: {str(e)}"
     
     def generate_sql_query(self, question):
@@ -92,24 +92,40 @@ class BedrockDeepSeekClient:
         # Get database schema
         schema_info = self.db.get_table_info()
         
-        # Optimized prompt for DeepSeek-R1 (English)
-        prompt = f"""You are an expert SQL developer. Given the following Northwind database schema:
+        # Very specific prompt for SQL-only output
+        prompt = f"""Given this database schema:
 
 {schema_info}
 
-User question: {question}
+Question: {question}
 
-Generate ONLY the SQL query needed to answer this question. 
-Do not include explanations, just clean and executable SQL.
+You must respond with ONLY the SQL query. No explanations, no reasoning, just the SQL statement.
 
-SQL:"""
+Example format:
+SELECT COUNT(*) FROM customers;
+
+Your SQL query:"""
         
-        sql_query = self.call_bedrock(prompt, max_tokens=200)
+        sql_query = self.call_bedrock(prompt, max_tokens=100)
         
-        # Clean response
+        # Aggressive cleaning
+        lines = sql_query.split('\n')
+        for line in lines:
+            line = line.strip()
+            # Look for actual SQL (starts with SELECT, INSERT, UPDATE, DELETE, WITH, etc.)
+            if (line.upper().startswith(('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH', 'CREATE')) 
+                and not line.lower().startswith(('select count', 'select *', 'select distinct')) is False):
+                sql_query = line
+                break
+        
+        # Final cleanup
         sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
         if sql_query.startswith("SQL:"):
             sql_query = sql_query[4:].strip()
+        
+        # Ensure it ends with semicolon
+        if not sql_query.endswith(';'):
+            sql_query += ';'
             
         return sql_query
     
