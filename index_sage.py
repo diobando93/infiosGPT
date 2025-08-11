@@ -14,10 +14,10 @@ import time
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# Custom LLM class para SageMaker optimizado
+# Custom LLM class para SageMaker
 class SageMakerDeepSeekLLM(LLM):
     
-    def __init__(self, endpoint_name: str, region_name: str = "us-west-2", temperature: float = 0.1, max_tokens: int = 200):
+    def __init__(self, endpoint_name, region_name="us-west-2", temperature=0.1, max_tokens=200):
         super().__init__()
         self.endpoint_name = endpoint_name
         self.region_name = region_name
@@ -25,7 +25,7 @@ class SageMakerDeepSeekLLM(LLM):
         self.max_tokens = max_tokens
         self.runtime = boto3.client('sagemaker-runtime', region_name=self.region_name)
     
-    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+    def _call(self, prompt, stop=None):
         """Llamar al endpoint SageMaker"""
         try:
             payload = {
@@ -57,10 +57,10 @@ class SageMakerDeepSeekLLM(LLM):
                 
         except Exception as e:
             print(f"Error en SageMaker: {str(e)}")
-            raise Exception(f"Error llamando SageMaker: {str(e)}")
+            return f"Error: {str(e)}"
     
     @property
-    def _llm_type(self) -> str:
+    def _llm_type(self):
         return "sagemaker_deepseek"
 
 # Configuración FastAPI
@@ -251,27 +251,6 @@ async def consulta_simple(request: QueryRequest):
             status_code=500, 
             detail=f"Error: {str(e)}"
         )
-
-@app.get("/sagemaker-stats")
-async def sagemaker_stats():
-    """Estadísticas del endpoint SageMaker"""
-    try:
-        sagemaker = boto3.client('sagemaker', region_name=AWS_REGION)
-        
-        endpoint_info = sagemaker.describe_endpoint(
-            EndpointName=SAGEMAKER_ENDPOINT
-        )
-        
-        return {
-            "endpoint_name": SAGEMAKER_ENDPOINT,
-            "status": endpoint_info['EndpointStatus'],
-            "creation_time": str(endpoint_info['CreationTime']),
-            "instance_type": "ml.g4dn.xlarge",
-            "model": "deepseek-ai/deepseek-coder-6.7b-instruct"
-        }
-        
-    except Exception as e:
-        return {"error": str(e)}
 
 if __name__ == "__main__":
     print("🚀 Iniciando SQL Agent con SageMaker DeepSeek...")
