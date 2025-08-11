@@ -1,12 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from langchain_community.agent_toolkits.sql.base import create_sql_agent
-from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
-from langchain.llms.base import LLM
 import uvicorn
-from typing import Optional, List, Any
+from typing import Optional
 import os
 import boto3
 import json
@@ -14,59 +11,10 @@ import time
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# Custom LLM class para SageMaker
-class SageMakerDeepSeekLLM(LLM):
-    
-    def __init__(self, endpoint_name, region_name="us-west-2", temperature=0.1, max_tokens=200):
-        super().__init__()
-        self.endpoint_name = endpoint_name
-        self.region_name = region_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.runtime = boto3.client('sagemaker-runtime', region_name=self.region_name)
-    
-    def _call(self, prompt, stop=None):
-        """Llamar al endpoint SageMaker"""
-        try:
-            payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": self.max_tokens,
-                    "temperature": self.temperature,
-                    "top_p": 0.9,
-                    "do_sample": True,
-                    "return_full_text": False
-                }
-            }
-            
-            response = self.runtime.invoke_endpoint(
-                EndpointName=self.endpoint_name,
-                ContentType='application/json',
-                Body=json.dumps(payload)
-            )
-            
-            result = json.loads(response['Body'].read().decode())
-            
-            if isinstance(result, list) and len(result) > 0:
-                generated_text = result[0].get('generated_text', '')
-                return generated_text.strip()
-            elif isinstance(result, dict):
-                return result.get('generated_text', str(result))
-            else:
-                return str(result)
-                
-        except Exception as e:
-            print(f"Error en SageMaker: {str(e)}")
-            return f"Error: {str(e)}"
-    
-    @property
-    def _llm_type(self):
-        return "sagemaker_deepseek"
-
 # Configuración FastAPI
 app = FastAPI(
     title="🤖 SQL Agent with SageMaker DeepSeek",
-    description="Agente SQL ultra-rápido usando DeepSeek en Amazon SageMaker",
+    description="Agente SQL directo usando DeepSeek en Amazon SageMaker",
     version="2.0.0"
 )
 
@@ -98,61 +46,142 @@ class QueryRequest(BaseModel):
     pregunta: str
     verbose: Optional[bool] = True
 
-class QueryResponse(BaseModel):
-    pregunta: str
-    respuesta: dict
-    status: str
-
-# Configuración del agente SQL con SageMaker
-class SageMakerSQLAgent:
+# Cliente SageMaker simple
+class SimpleSageMakerClient:
     def __init__(self):
-        self.db = None
-        self.llm = None
-        self.agent_executor = None
-        self.initialize_agent()
+        self.endpoint_name = SAGEMAKER_ENDPOINT
+        self.runtime = boto3.client('sagemaker-runtime', region_name=AWS_REGION)
+        self.db = SQLDatabase.from_uri(DB_URI)
     
-    def initialize_agent(self):
+    def call_sagemaker(self, prompt):
+        """Llamar directamente a SageMaker"""
         try:
-            print("🔌 Conectando a PostgreSQL Northwind...")
-            self.db = SQLDatabase.from_uri(DB_URI)
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "max_new_tokens": 200,
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "do_sample": True,
+                    "return_full_text": False
+                }
+            }
             
-            print("🤖 Inicializando DeepSeek en SageMaker...")
-            self.llm = SageMakerDeepSeekLLM(
-                endpoint_name=SAGEMAKER_ENDPOINT,
-                region_name=AWS_REGION,
-                temperature=0.1,
-                max_tokens=200
+            response = self.runtime.invoke_endpoint(
+                EndpointName=self.endpoint_name,
+                ContentType='application/json',
+                Body=json.dumps(payload)
             )
             
-            # Test de conexión inicial
-            print("🧪 Testeando conexión SageMaker...")
-            test_response = self.llm._call("SELECT 1;")
-            print(f"✅ Test exitoso: {test_response[:50]}...")
+            result = json.loads(response['Body'].read().decode())
             
-            # Crear agente SQL
-            toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
-            self.agent_executor = create_sql_agent(
-                llm=self.llm, 
-                toolkit=toolkit, 
-                verbose=True,
-                max_iterations=3,
-                early_stopping_method="generate"
-            )
+            if isinstance(result, list) and len(result) > 0:
+                return result[0].get('generated_text', '').strip()
+            elif isinstance(result, dict):
+                return result.get('generated_text', str(result))
+            else:
+                return str(result)
+                
+        except Exception as e:
+            print(f"Error en SageMaker: {str(e)}")
+            return f"Error: {str(e)}"
+    
+    def generate_sql_query(self, question):
+        """Generar consulta SQL usando el modelo"""
+        # Obtener esquema de la base de datos
+        schema_info = self.db.get_table_info()
+        
+        # Crear prompt para generar SQL
+        prompt = f"""
+Eres un experto en SQL. Dada la siguiente información de la base de datos Northwind:
+
+{schema_info}
+
+Usuario pregunta: {question}
+
+Genera SOLO la consulta SQL necesaria para responder la pregunta. No incluyas explicaciones adicionales.
+
+SQL:"""
+        
+        sql_query = self.call_sagemaker(prompt)
+        return sql_query.strip()
+    
+    def execute_sql_query(self, sql_query):
+        """Ejecutar consulta SQL en la base de datos"""
+        try:
+            # Limpiar la consulta
+            sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+            if sql_query.startswith("SQL:"):
+                sql_query = sql_query[4:].strip()
             
-            print("✅ Agente SQL con SageMaker inicializado correctamente")
+            print(f"🔍 Ejecutando SQL: {sql_query}")
+            
+            # Ejecutar consulta
+            result = self.db.run(sql_query)
+            return result
             
         except Exception as e:
-            print(f"❌ Error inicializando agente: {str(e)}")
-            raise e
+            print(f"Error ejecutando SQL: {str(e)}")
+            return f"Error ejecutando consulta: {str(e)}"
+    
+    def answer_question(self, question):
+        """Responder pregunta completa"""
+        try:
+            # Paso 1: Generar SQL
+            sql_query = self.generate_sql_query(question)
+            
+            # Paso 2: Ejecutar SQL
+            sql_result = self.execute_sql_query(sql_query)
+            
+            # Paso 3: Formatear respuesta
+            if "Error" in str(sql_result):
+                return f"❌ {sql_result}"
+            
+            # Generar respuesta natural
+            response_prompt = f"""
+Pregunta del usuario: {question}
+Consulta SQL ejecutada: {sql_query}
+Resultado: {sql_result}
 
-# Inicializar agente
+Proporciona una respuesta clara y natural en español sobre el resultado:"""
+            
+            natural_response = self.call_sagemaker(response_prompt)
+            
+            return f"""
+📊 **Consulta SQL:**
+```sql
+{sql_query}
+```
+
+📋 **Resultado:**
+{sql_result}
+
+✅ **Respuesta:**
+{natural_response}
+"""
+            
+        except Exception as e:
+            return f"❌ Error procesando pregunta: {str(e)}"
+
+# Inicializar cliente
 print("🚀 Iniciando configuración...")
 try:
-    sql_agent = SageMakerSQLAgent()
+    sagemaker_client = SimpleSageMakerClient()
+    
+    # Test inicial
+    print("🧪 Testeando conexión...")
+    test_response = sagemaker_client.call_sagemaker("SELECT 1;")
+    print(f"✅ Test SageMaker exitoso: {test_response[:50]}...")
+    
+    # Test base de datos
+    db_test = sagemaker_client.db.run("SELECT COUNT(*) FROM customers")
+    print(f"✅ Test BD exitoso: {db_test[0][0]} clientes")
+    
     print("🎉 ¡Sistema listo!")
+    
 except Exception as e:
     print(f"❌ Error crítico: {e}")
-    sql_agent = None
+    sagemaker_client = None
 
 # Servir archivos estáticos
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
@@ -163,97 +192,59 @@ async def read_index():
 
 @app.get("/health")
 async def health_check():
-    """Health check con información de SageMaker"""
+    """Health check"""
     try:
-        db_status = "conectada" if sql_agent and sql_agent.db else "desconectada"
+        if not sagemaker_client:
+            return {"status": "error", "detail": "Cliente no inicializado"}
         
-        # Test SageMaker
-        sagemaker_status = "disponible"
-        if sql_agent and sql_agent.llm:
-            try:
-                start_time = time.time()
-                test_response = sql_agent.llm._call("Test connection")
-                response_time = time.time() - start_time
-                sagemaker_status = f"funcionando ({response_time:.2f}s)"
-            except Exception as e:
-                sagemaker_status = f"error: {str(e)[:50]}"
-        else:
-            sagemaker_status = "no inicializado"
+        # Test rápido
+        start_time = time.time()
+        test_response = sagemaker_client.call_sagemaker("Test")
+        response_time = time.time() - start_time
         
         return {
             "status": "ok",
-            "database": db_status,
-            "llm_model": f"DeepSeek-Coder-6.7B via SageMaker ({sagemaker_status})",
-            "agent": "inicializado" if sql_agent and sql_agent.agent_executor else "no inicializado",
+            "database": "conectada",
+            "llm_model": f"DeepSeek-Coder-6.7B via SageMaker ({response_time:.2f}s)",
+            "agent": "funcionando",
             "endpoint": SAGEMAKER_ENDPOINT,
             "region": AWS_REGION
         }
     except Exception as e:
-        return {
-            "status": "error",
-            "detail": str(e)
-        }
-
-@app.post("/query", response_model=QueryResponse)
-async def hacer_consulta(request: QueryRequest):
-    """Consulta usando SageMaker DeepSeek"""
-    if not sql_agent or not sql_agent.agent_executor:
-        raise HTTPException(
-            status_code=500, 
-            detail="Agente SQL no está inicializado"
-        )
-    
-    try:
-        print(f"🔍 Procesando con SageMaker: {request.pregunta}")
-        start_time = time.time()
-        
-        respuesta = sql_agent.agent_executor.invoke(request.pregunta)
-        
-        response_time = time.time() - start_time
-        print(f"✅ Consulta completada en {response_time:.2f}s")
-        
-        return QueryResponse(
-            pregunta=request.pregunta,
-            respuesta=respuesta,
-            status="exitoso"
-        )
-        
-    except Exception as e:
-        print(f"❌ Error en consulta SageMaker: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error: {str(e)}"
-        )
+        return {"status": "error", "detail": str(e)}
 
 @app.post("/simple-query")
 async def consulta_simple(request: QueryRequest):
-    """Versión simplificada para el frontend"""
+    """Consulta simplificada directa"""
     try:
-        if not sql_agent or not sql_agent.agent_executor:
-            raise HTTPException(
-                status_code=500, 
-                detail="Agente no disponible"
-            )
+        if not sagemaker_client:
+            raise HTTPException(status_code=500, detail="Cliente no disponible")
         
-        print(f"🔍 Consulta simple: {request.pregunta}")
+        print(f"🔍 Procesando: {request.pregunta}")
+        start_time = time.time()
         
-        respuesta = sql_agent.agent_executor.invoke(request.pregunta)
-        respuesta_final = respuesta.get('output', respuesta) if isinstance(respuesta, dict) else respuesta
+        # Procesar pregunta
+        respuesta = sagemaker_client.answer_question(request.pregunta)
+        
+        response_time = time.time() - start_time
+        print(f"✅ Completado en {response_time:.2f}s")
         
         return {
             "pregunta": request.pregunta,
-            "respuesta": respuesta_final
+            "respuesta": respuesta
         }
         
     except Exception as e:
-        print(f"❌ Error en consulta simple: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error: {str(e)}"
-        )
+        print(f"❌ Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.post("/query")
+async def hacer_consulta(request: QueryRequest):
+    """Alias para compatibilidad"""
+    return await consulta_simple(request)
 
 if __name__ == "__main__":
-    print("🚀 Iniciando SQL Agent con SageMaker DeepSeek...")
+    print("🚀 Iniciando SQL Agent simple con SageMaker...")
     print(f"🌐 Acceso: http://35.94.145.5:8000")
     print("📖 Docs: http://35.94.145.5:8000/docs")
     
