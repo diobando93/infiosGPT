@@ -103,6 +103,71 @@ async function sendQuery() {
 }
 
 /**
+ * Parsear respuesta con formato markdown de DeepSeek-R1
+ */
+function parseMarkdownResponse(answer) {
+    let parsed = {
+        sql: '',
+        results: '',
+        interpretation: ''
+    };
+    
+    // Extraer SQL query
+    const sqlMatch = answer.match(/```sql\n(.*?)\n```/s);
+    if (sqlMatch) {
+        parsed.sql = sqlMatch[1].trim();
+    }
+    
+    // Extraer Results
+    const resultsMatch = answer.match(/📋 \*\*Results?:\*\*\n(.*?)(?=\n\n✅|$)/s);
+    if (resultsMatch) {
+        parsed.results = resultsMatch[1].trim();
+    }
+    
+    // Extraer Answer/Interpretation
+    const answerMatch = answer.match(/✅ \*\*Answer:\*\*\n(.*?)$/s);
+    if (answerMatch) {
+        parsed.interpretation = answerMatch[1].trim();
+    }
+    
+    return parsed;
+}
+
+/**
+ * Formatear respuesta para mostrar en el frontend
+ */
+function formatResponseText(data) {
+    const question = data.question || data.pregunta;
+    const time = data.time || '0s';
+    const model = data.model || 'DeepSeek-R1';
+    
+    let formattedText = `❓ QUESTION:\n${question}\n\n`;
+    formattedText += `⏱️ TIME: ${time} | 🤖 MODEL: ${model}\n\n`;
+    
+    // Si hay una respuesta formateada, parsearla
+    if (data.answer) {
+        const parsed = parseMarkdownResponse(data.answer);
+        
+        if (parsed.sql) {
+            formattedText += `🔍 SQL QUERY:\n${parsed.sql}\n\n`;
+        }
+        
+        if (parsed.results) {
+            formattedText += `📋 RESULTS:\n${parsed.results}\n\n`;
+        }
+        
+        if (parsed.interpretation) {
+            formattedText += `✅ ANSWER:\n${parsed.interpretation}`;
+        }
+    } else if (data.respuesta) {
+        // Formato anterior compatible
+        formattedText += `✅ RESULT:\n${data.respuesta}`;
+    }
+    
+    return formattedText;
+}
+
+/**
  * Actualizar estado del botón de envío
  */
 function updateButtonState(btn, icon, text, isLoading) {
@@ -124,7 +189,7 @@ function showLoadingProgress(responseBox) {
     responseBox.className = 'response-box loading';
     
     const loadingMessages = [
-        '🔄 Analyzing your question...',
+        '🔄 Analyzing your question with DeepSeek-R1...',
         '🧠 Generating SQL query...',
         '📊 Executing on database...',
         '✨ Processing results...'
@@ -136,7 +201,7 @@ function showLoadingProgress(responseBox) {
     return setInterval(() => {
         messageIndex = (messageIndex + 1) % loadingMessages.length;
         responseBox.textContent = loadingMessages[messageIndex];
-    }, 3000);
+    }, 2000);
 }
 
 /**
@@ -144,7 +209,7 @@ function showLoadingProgress(responseBox) {
  */
 function showSuccessResponse(responseBox, data) {
     responseBox.className = 'response-box success';
-    responseBox.textContent = `Query: ${data.pregunta}\n\n✅ Result:\n${data.respuesta}`;
+    responseBox.textContent = formatResponseText(data);
 }
 
 /**
@@ -152,7 +217,7 @@ function showSuccessResponse(responseBox, data) {
  */
 function showErrorResponse(responseBox, errorDetail) {
     responseBox.className = 'response-box error';
-    responseBox.textContent = `❌ Error: ${errorDetail}`;
+    responseBox.textContent = `❌ ERROR: ${errorDetail}`;
 }
 
 /**
@@ -160,7 +225,7 @@ function showErrorResponse(responseBox, errorDetail) {
  */
 function showConnectionError(responseBox, errorMessage) {
     responseBox.className = 'response-box error';
-    responseBox.textContent = `❌ Connection error: ${errorMessage}\n\nVerify that the API is running on ${API_URL}`;
+    responseBox.textContent = `❌ CONNECTION ERROR: ${errorMessage}\n\nVerify that the API is running on ${API_URL}`;
 }
 
 /**
