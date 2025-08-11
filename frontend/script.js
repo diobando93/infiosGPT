@@ -112,19 +112,19 @@ function parseMarkdownResponse(answer) {
         interpretation: ''
     };
     
-    // Extraer SQL query
-    const sqlMatch = answer.match(/```sql\n(.*?)\n```/s);
+    // Extraer SQL query - buscar después de **SQL Query:**
+    const sqlMatch = answer.match(/\*\*SQL Query:\*\*\n```sql\n(.*?)\n```/s);
     if (sqlMatch) {
         parsed.sql = sqlMatch[1].trim();
     }
     
-    // Extraer Results
-    const resultsMatch = answer.match(/📋 \*\*Results?:\*\*\n(.*?)(?=\n\n✅|$)/s);
+    // Extraer Results - buscar después de **Results:**
+    const resultsMatch = answer.match(/📋 \*\*Results:\*\*\n(.*?)(?=\n\n✅|$)/s);
     if (resultsMatch) {
         parsed.results = resultsMatch[1].trim();
     }
     
-    // Extraer Answer/Interpretation
+    // Extraer Answer - buscar después de **Answer:**
     const answerMatch = answer.match(/✅ \*\*Answer:\*\*\n(.*?)$/s);
     if (answerMatch) {
         parsed.interpretation = answerMatch[1].trim();
@@ -137,7 +137,9 @@ function parseMarkdownResponse(answer) {
  * Formatear respuesta para mostrar en el frontend
  */
 function formatResponseText(data) {
-    const question = data.question || data.pregunta;
+    console.log('Data received:', data); // Debug log
+    
+    const question = data.question || data.pregunta || 'Unknown question';
     const time = data.time || '0s';
     const model = data.model || 'DeepSeek-R1';
     
@@ -145,8 +147,11 @@ function formatResponseText(data) {
     formattedText += `⏱️ TIME: ${time} | 🤖 MODEL: ${model}\n\n`;
     
     // Si hay una respuesta formateada, parsearla
-    if (data.answer) {
-        const parsed = parseMarkdownResponse(data.answer);
+    const answer = data.answer || data.respuesta;
+    if (answer) {
+        console.log('Answer received:', answer); // Debug log
+        const parsed = parseMarkdownResponse(answer);
+        console.log('Parsed result:', parsed); // Debug log
         
         if (parsed.sql) {
             formattedText += `🔍 SQL QUERY:\n${parsed.sql}\n\n`;
@@ -159,9 +164,13 @@ function formatResponseText(data) {
         if (parsed.interpretation) {
             formattedText += `✅ ANSWER:\n${parsed.interpretation}`;
         }
-    } else if (data.respuesta) {
-        // Formato anterior compatible
-        formattedText += `✅ RESULT:\n${data.respuesta}`;
+        
+        // Si no se parseó correctamente, mostrar la respuesta completa
+        if (!parsed.sql && !parsed.results && !parsed.interpretation) {
+            formattedText += `📝 FULL RESPONSE:\n${answer}`;
+        }
+    } else {
+        formattedText += `❌ No answer received from server`;
     }
     
     return formattedText;
