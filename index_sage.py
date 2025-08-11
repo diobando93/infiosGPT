@@ -113,46 +113,53 @@ class QueryResponse(BaseModel):
     status: str
 
 # Configuración del agente SQL con SageMaker
-class SageMakerSQLAgent:
-    def __init__(self):
-        self.db = None
-        self.llm = None
-        self.agent_executor = None
-        self.initialize_agent()
+class SageMakerDeepSeekLLM(LLM):
     
-    def initialize_agent(self):
+    def __init__(self, endpoint_name: str, region_name: str = "us-west-2", temperature: float = 0.1, max_tokens: int = 200):
+        super().__init__()
+        self.endpoint_name = endpoint_name
+        self.region_name = region_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.runtime = boto3.client('sagemaker-runtime', region_name=self.region_name)
+    
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+        """Llamar al endpoint SageMaker"""
         try:
-            print("🔌 Conectando a PostgreSQL Northwind...")
-            self.db = SQLDatabase.from_uri(DB_URI)
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "max_new_tokens": self.max_tokens,
+                    "temperature": self.temperature,
+                    "top_p": 0.9,
+                    "do_sample": True,
+                    "return_full_text": False
+                }
+            }
             
-            print("🤖 Inicializando DeepSeek en SageMaker...")
-            self.llm = SageMakerDeepSeekLLM(
-                endpoint_name=SAGEMAKER_ENDPOINT,
-                region_name=AWS_REGION,
-                temperature=0.1,
-                max_tokens=200
+            response = self.runtime.invoke_endpoint(
+                EndpointName=self.endpoint_name,
+                ContentType='application/json',
+                Body=json.dumps(payload)
             )
             
-            # Test de conexión inicial
-            print("🧪 Testeando conexión SageMaker...")
-            test_response = self.llm._call("SELECT 1;")
-            print(f"✅ Test exitoso: {test_response[:50]}...")
+            result = json.loads(response['Body'].read().decode())
             
-            # Crear agente SQL
-            toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
-            self.agent_executor = create_sql_agent(
-                llm=self.llm, 
-                toolkit=toolkit, 
-                verbose=True,
-                max_iterations=3,
-                early_stopping_method="generate"
-            )
-            
-            print("✅ Agente SQL con SageMaker inicializado correctamente")
-            
+            if isinstance(result, list) and len(result) > 0:
+                generated_text = result[0].get('generated_text', '')
+                return generated_text.strip()
+            elif isinstance(result, dict):
+                return result.get('generated_text', str(result))
+            else:
+                return str(result)
+                
         except Exception as e:
-            print(f"❌ Error inicializando agente: {str(e)}")
-            raise e
+            print(f"Error en SageMaker: {str(e)}")
+            raise Exception(f"Error llamando SageMaker: {str(e)}")
+    
+    @property
+    def _llm_type(self) -> str:
+        return "sagemaker_deepseek"
 
 # Inicializar agente
 print("🚀 Iniciando configuración...")
