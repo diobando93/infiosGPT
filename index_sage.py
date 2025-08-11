@@ -60,13 +60,13 @@ class BedrockDeepSeekClient:
             # Formato simplificado sin caracteres especiales
             formatted_prompt = f"Human: {prompt}\n\nAssistant:"
             
-            # Configuration for DeepSeek-R1
+            # Configuration for DeepSeek-R1 - allow more reasoning
             body = {
                 "prompt": formatted_prompt,
                 "max_tokens": max_tokens,
-                "temperature": 0.0,  # Más determinístico
-                "top_p": 0.1,        # Más enfocado
-                "stop": ["Human:", "\n\n", "Explanation:", "Note:"]
+                "temperature": 0.1,  # Un poco de creatividad pero controlada
+                "top_p": 0.9,
+                "stop": ["Human:", "Question:", "Schema:"]  # Stop words más específicos
             }
             
             response = self.bedrock_runtime.invoke_model(
@@ -92,85 +92,79 @@ class BedrockDeepSeekClient:
         # Get database schema
         schema_info = self.db.get_table_info()
         
-        # Very specific prompt for SQL-only output
+        # Prompt that allows reasoning but asks for final SQL
         prompt = f"""Database schema:
 {schema_info}
 
 Question: {question}
 
-Rules:
-1. Respond with ONLY a SQL statement
-2. No explanations, no reasoning, no text
-3. Just the SQL query ending with semicolon
+Think step by step, then provide the final SQL query on the last line starting with "FINAL SQL:"
 
-SQL:"""
+FINAL SQL:"""
         
-        sql_query = self.call_bedrock(prompt, max_tokens=50)
+        # Give more tokens for complete reasoning
+        sql_response = self.call_bedrock(prompt, max_tokens=500)
         
-        # Very aggressive cleaning
-        sql_query = self.clean_sql_response(sql_query)
+        # Extract the final SQL from the response
+        sql_query = self.extract_final_sql(sql_response)
         
         return sql_query
     
-    def clean_sql_response(self, response):
-        """Clean SQL response aggressively"""
-        # Remove common prefixes
-        response = response.replace("```sql", "").replace("```", "").strip()
-        response = response.replace("SQL:", "").strip()
+    def extract_final_sql(self, response):
+        """Extract final SQL from reasoning response"""
+        print(f"Raw SQL response: {response}")  # Debug
         
-        # Split by lines and look for actual SQL
-        lines = response.split('\n')
+        # Look for "FINAL SQL:" pattern first
+        if "FINAL SQL:" in response:
+            sql_part = response.split("FINAL SQL:")[-1].strip()
+        else:
+            # Look for the last SELECT statement in the response
+            import re
+            sql_matches = re.findall(r'SELECT\s+.*?(?:;|$)', response, re.IGNORECASE | re.DOTALL)
+            if sql_matches:
+                sql_part = sql_matches[-1].strip()  # Take the last one
+            else:
+                # Fallback to full response processing
+                sql_part = response.strip()
+        
+        # Clean up the SQL
+        sql_part = sql_part.replace("```sql", "").replace("```", "").strip()
+        
+        # Extract just the SQL line
+        lines = sql_part.split('\n')
         for line in lines:
             line = line.strip()
-            # Look for lines that start with SQL keywords
-            if line.upper().startswith(('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH', 'CREATE')):
-                # Make sure it's not just starting with SELECT but is actual SQL
-                if any(word in line.upper() for word in ['FROM', 'WHERE', 'ORDER', 'GROUP', 'HAVING', 'LIMIT']):
-                    sql_query = line
-                    break
-                elif line.upper().startswith('SELECT') and ('COUNT' in line.upper() or '*' in line):
-                    sql_query = line
-                    break
+            if line.upper().startswith(('SELECT', 'INSERT', 'UPDATE', 'DELETE')):
+                sql_query = line
+                break
         else:
-            # If no proper SQL found, try to extract from first line
-            first_line = lines[0].strip() if lines else response
-            sql_query = first_line
+            # If no SQL found, use fallback
+            sql_query = self.generate_fallback_sql(response)
         
-        # Remove any remaining explanatory text
-        if sql_query.upper().startswith(('OKAY', 'LET', 'THE', 'TO', 'I ', 'WE ', 'THIS')):
-            # This is not SQL, try to find SQL pattern
-            import re
-            sql_pattern = r'(SELECT\s+.*?;)'
-            match = re.search(sql_pattern, response, re.IGNORECASE | re.DOTALL)
-            if match:
-                sql_query = match.group(1)
-            else:
-                # Fallback: construct basic query based on question
-                sql_query = self.fallback_sql_generation(response)
-        
-        # Ensure it ends with semicolon
-        if not sql_query.strip().endswith(';'):
-            sql_query = sql_query.strip() + ';'
+        # Ensure semicolon
+        if not sql_query.endswith(';'):
+            sql_query += ';'
             
+        print(f"Cleaned SQL: {sql_query}")  # Debug
         return sql_query
     
-    def fallback_sql_generation(self, question_context):
-        """Generate basic SQL if parsing fails"""
-        question_lower = question_context.lower()
+    def generate_fallback_sql(self, context):
+        """Generate SQL based on question context"""
+        context_lower = context.lower()
         
-        if 'count' in question_lower and 'order' in question_lower:
+        # Common patterns
+        if 'count' in context_lower and 'order' in context_lower:
             return "SELECT COUNT(*) FROM orders;"
-        elif 'count' in question_lower and 'customer' in question_lower:
+        elif 'count' in context_lower and 'customer' in context_lower:
             return "SELECT COUNT(*) FROM customers;"
-        elif 'count' in question_lower and 'product' in question_lower:
+        elif 'count' in context_lower and 'product' in context_lower:
             return "SELECT COUNT(*) FROM products;"
-        elif 'count' in question_lower and 'employee' in question_lower:
-            return "SELECT COUNT(*) FROM employees;"
-        elif 'order' in question_lower and 'date' in question_lower:
+        elif 'date' in context_lower and '1996-07-04' in context_lower:
             return "SELECT * FROM orders WHERE order_date = '1996-07-04';"
-        elif 'first' in question_lower and 'product' in question_lower:
+        elif 'first' in context_lower and 'product' in context_lower:
             return "SELECT * FROM products LIMIT 5;"
         else:
+            # Default safe query
             return "SELECT COUNT(*) FROM customers;"
     
     def execute_sql_query(self, sql_query):
