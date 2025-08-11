@@ -128,8 +128,9 @@ class SageMakerSQLAgent:
             print("🤖 Inicializando DeepSeek en SageMaker...")
             self.llm = SageMakerDeepSeekLLM(
                 endpoint_name=SAGEMAKER_ENDPOINT,
+                region_name=AWS_REGION,
                 temperature=0.1,
-                max_tokens=200  # Optimizado para respuestas rápidas
+                max_tokens=200
             )
             
             # Test de conexión inicial
