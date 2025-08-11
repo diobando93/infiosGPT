@@ -8,14 +8,13 @@ import os
 import boto3
 import json
 import time
-from botocore.config import Config
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# FastAPI configuration
+# Configuración FastAPI
 app = FastAPI(
-    title="🤖 Fast SQL Agent with SageMaker DeepSeek",
-    description="Fast SQL Agent using DeepSeek on Amazon SageMaker",
+    title="🤖 SQL Agent with Bedrock DeepSeek",
+    description="Agente SQL usando DeepSeek-R1 en Amazon Bedrock (sin EC2)",
     version="3.0.0"
 )
 
@@ -27,185 +26,234 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Database configuration
+# Configuración de base de datos
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123") 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5499")
 DB_NAME = os.getenv("DB_NAME", "northwind")
 DB_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# SageMaker configuration
-SAGEMAKER_ENDPOINT = "deepseek-coder-endpoint"
-AWS_REGION = "us-west-2"
+# Configuración Bedrock (sin EC2!)
+AWS_REGION = "us-east-1"  # Región confirmada que funciona
+BEDROCK_MODEL_ID = "us.deepseek.r1-v1:0"  # ID del perfil de inferencia correcto
 
-print(f"🔗 Database: {DB_URI}")
-print(f"🤖 SageMaker endpoint: {SAGEMAKER_ENDPOINT}")
+print(f"🔗 Base de datos: {DB_URI}")
+print(f"🤖 Bedrock modelo: {BEDROCK_MODEL_ID}")
+print(f"🌎 Región: {AWS_REGION}")
 
-# Pydantic models
+# Modelos Pydantic
 class QueryRequest(BaseModel):
     pregunta: str
     verbose: Optional[bool] = True
 
-# SageMaker + DB Client
-class SimpleSageMakerClient:
+# Cliente Bedrock para DeepSeek
+class BedrockDeepSeekClient:
     def __init__(self):
-        cfg = Config(
-            read_timeout=30,  # optimized for fast queries
-            connect_timeout=5,
-            retries={"max_attempts": 0}
-        )
-        self.endpoint_name = SAGEMAKER_ENDPOINT
-        self.runtime = boto3.client("sagemaker-runtime", region_name=AWS_REGION, config=cfg)
+        self.model_id = BEDROCK_MODEL_ID
+        self.bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
         self.db = SQLDatabase.from_uri(DB_URI)
-
-    def get_minimal_schema(self, relevant_tables):
-        """Get only relevant tables and columns to reduce prompt size."""
-        schema_info = {}
-        with self.db._engine.connect() as conn:
-            for table in relevant_tables:
-                cols = conn.execute(f"""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_name = '{table}'
-                    ORDER BY ordinal_position
-                """).fetchall()
-                schema_info[table] = [c[0] for c in cols]
-        return "\n".join([f"{t}: {', '.join(cols)}" for t, cols in schema_info.items()])
-
-    def call_sagemaker(self, prompt, max_new_tokens=64):
-        """Call SageMaker endpoint."""
+    
+    def call_bedrock(self, prompt, max_tokens=500):
+        """Llamar a DeepSeek-R1 en Bedrock (completamente gestionado)"""
         try:
-            payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "max_new_tokens": max_new_tokens,
-                    "temperature": 0,
-                    "do_sample": False,
-                    "return_full_text": False
-                }
+            # Formato específico para DeepSeek-R1
+            formatted_prompt = f"<｜begin▁of▁sentence｜><｜User｜>{prompt}<｜Assistant｜><think>\n"
+            
+            # Configuración para DeepSeek-R1
+            body = {
+                "prompt": formatted_prompt,
+                "max_tokens": max_tokens,
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "stop": ["<｜User｜>", "<｜end▁of▁sentence｜>"]
             }
-            response = self.runtime.invoke_endpoint(
-                EndpointName=self.endpoint_name,
-                ContentType="application/json",
-                Body=json.dumps(payload)
+            
+            response = self.bedrock_runtime.invoke_model(
+                modelId=self.model_id,
+                body=json.dumps(body),
+                contentType='application/json',
+                accept='application/json'
             )
-            result = json.loads(response["Body"].read().decode())
-            if isinstance(result, list) and len(result) > 0:
-                return result[0].get("generated_text", "").strip()
-            elif isinstance(result, dict):
-                return result.get("generated_text", "")
-            return str(result)
+            
+            result = json.loads(response['body'].read())
+            # DeepSeek-R1 devuelve en formato 'choices'
+            if 'choices' in result and len(result['choices']) > 0:
+                return result['choices'][0].get('text', '').strip()
+            else:
+                return result.get('completion', str(result)).strip()
+                
         except Exception as e:
-            raise RuntimeError(f"SageMaker invocation failed: {e}")
-
+            print(f"Error en Bedrock: {str(e)}")
+            return f"Error: {str(e)}"
+    
     def generate_sql_query(self, question):
-        """Generate SQL query in English using minimal schema."""
-        schema_info = self.get_minimal_schema(["customers", "orders", "order_details", "products"])
-        prompt = f"""
-You are an expert in PostgreSQL.
-Only use the tables and columns below:
+        """Generate SQL query using DeepSeek-R1"""
+        # Get database schema
+        schema_info = self.db.get_table_info()
+        
+        # Optimized prompt for DeepSeek-R1 (English)
+        prompt = f"""You are an expert SQL developer. Given the following Northwind database schema:
 
 {schema_info}
 
-Write ONLY the SQL query to answer the following question, no explanations, no backticks.
+User question: {question}
 
-Question: {question}
-"""
-        sql_query = self.call_sagemaker(prompt)
+Generate ONLY the SQL query needed to answer this question. 
+Do not include explanations, just clean and executable SQL.
+
+SQL:"""
+        
+        sql_query = self.call_bedrock(prompt, max_tokens=200)
+        
+        # Clean response
         sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
-        if not sql_query.lower().startswith(("select", "with", "insert", "update", "delete")):
-            raise ValueError(f"Invalid SQL generated: {sql_query}")
+        if sql_query.startswith("SQL:"):
+            sql_query = sql_query[4:].strip()
+            
         return sql_query
-
+    
     def execute_sql_query(self, sql_query):
-        """Run SQL query against the database."""
+        """Ejecutar consulta SQL en la base de datos"""
         try:
-            print(f"🔍 Executing SQL: {sql_query}")
+            print(f"🔍 Ejecutando SQL: {sql_query}")
             result = self.db.run(sql_query)
             return result
+            
         except Exception as e:
-            raise RuntimeError(f"Error executing SQL: {e}")
-
+            print(f"Error ejecutando SQL: {str(e)}")
+            return f"Error ejecutando consulta: {str(e)}"
+    
     def answer_question(self, question):
-        """Generate SQL, execute it, and return results."""
+        """Answer complete question using DeepSeek-R1"""
         try:
+            # Step 1: Generate SQL
             sql_query = self.generate_sql_query(question)
-        except Exception as e:
-            return f"❌ Could not generate SQL: {e}"
-
-        try:
+            
+            # Step 2: Execute SQL
             sql_result = self.execute_sql_query(sql_query)
+            
+            # Step 3: Format response
+            if "Error" in str(sql_result):
+                return f"❌ {sql_result}"
+            
+            # Generate natural response with DeepSeek-R1
+            response_prompt = f"""Question: {question}
+SQL Query executed: {sql_query}
+Results: {sql_result}
+
+Provide a clear and natural response in the same language as the question, interpreting these results:"""
+            
+            natural_response = self.call_bedrock(response_prompt, max_tokens=300)
+            
+            return f"""
+📊 **SQL Query:**
+```sql
+{sql_query}
+```
+
+📋 **Results:**
+{sql_result}
+
+✅ **Answer:**
+{natural_response}
+"""
+            
         except Exception as e:
-            return f"❌ {e}"
+            return f"❌ Error processing question: {str(e)}"
 
-        return {
-            "sql": sql_query,
-            "result": [dict(row) for row in sql_result]
-        }
-
-# Init client
-print("🚀 Initializing configuration...")
+# Inicializar cliente
+print("🚀 Iniciando configuración con Bedrock...")
 try:
-    sagemaker_client = SimpleSageMakerClient()
-    print("🧪 Testing SageMaker connection...")
-    test_response = sagemaker_client.call_sagemaker("SELECT 1;")
-    print(f"✅ SageMaker test OK: {test_response[:50]}...")
-    db_test = sagemaker_client.db.run("SELECT COUNT(*) FROM customers")
-    print(f"✅ DB test OK: {db_test[0][0]} customers")
+    bedrock_client = BedrockDeepSeekClient()
+    
+    # Test initial
+    print("🧪 Testing Bedrock connection...")
+    test_response = bedrock_client.call_bedrock("Respond: OK")
+    print(f"✅ Bedrock test successful: {test_response[:50]}...")
+    
+    # Test database
+    db_test = bedrock_client.db.run("SELECT COUNT(*) FROM customers")
+    print(f"✅ Database test successful: {db_test[0][0]} customers")
+    
+    print("🎉 System ready for English and Spanish queries!")
+    
 except Exception as e:
-    print(f"❌ Critical error: {e}")
-    sagemaker_client = None
+    print(f"❌ Error crítico: {e}")
+    bedrock_client = None
 
-# Static files
+# Servir archivos estáticos
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.get("/")
 async def read_index():
-    return FileResponse("frontend/index.html")
+    return FileResponse('frontend/index.html')
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check"""
     try:
-        if not sagemaker_client:
-            return {"status": "error", "detail": "Client not initialized"}
+        if not bedrock_client:
+            return {"status": "error", "detail": "Cliente no inicializado"}
+        
+        # Test rápido
         start_time = time.time()
-        sagemaker_client.call_sagemaker("Test")
+        test_response = bedrock_client.call_bedrock("Test")
         response_time = time.time() - start_time
+        
         return {
             "status": "ok",
-            "database": "connected",
-            "llm_model": f"DeepSeek-Coder via SageMaker ({response_time:.2f}s)",
-            "endpoint": SAGEMAKER_ENDPOINT,
-            "region": AWS_REGION
+            "database": "conectada",
+            "llm_model": f"DeepSeek-R1 via Bedrock ({response_time:.2f}s)",
+            "agent": "funcionando",
+            "model_id": BEDROCK_MODEL_ID,
+            "region": AWS_REGION,
+            "infrastructure": "completamente gestionada (sin EC2)"
         }
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
 @app.post("/simple-query")
 async def consulta_simple(request: QueryRequest):
-    """Process a question and return SQL + results."""
+    """Query using DeepSeek-R1 in Bedrock - Supports English and Spanish"""
     try:
-        if not sagemaker_client:
-            raise HTTPException(status_code=500, detail="Client unavailable")
-        print(f"🔍 Processing: {request.pregunta}")
+        if not bedrock_client:
+            raise HTTPException(status_code=500, detail="Client not available")
+        
+        print(f"🔍 Processing with Bedrock: {request.pregunta}")
         start_time = time.time()
-        respuesta = sagemaker_client.answer_question(request.pregunta)
+        
+        # Process question
+        respuesta = bedrock_client.answer_question(request.pregunta)
+        
         response_time = time.time() - start_time
+        print(f"✅ Completed in {response_time:.2f}s")
+        
         return {
             "question": request.pregunta,
-            "response": respuesta,
+            "answer": respuesta,
+            "model": "DeepSeek-R1 (Bedrock)",
             "time": f"{response_time:.2f}s"
         }
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {e}")
+        print(f"❌ Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @app.post("/query")
 async def hacer_consulta(request: QueryRequest):
-    """Alias for simple-query."""
+    """Alias para compatibilidad"""
     return await consulta_simple(request)
 
 if __name__ == "__main__":
-    print("🚀 Starting Fast SQL Agent...")
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+    print("🚀 Iniciando SQL Agent con DeepSeek-R1 en Bedrock...")
+    print("💰 SIN costos de EC2 - Servicio completamente gestionado")
+    print(f"🌐 Acceso: http://35.94.145.5:8000")
+    print("📖 Docs: http://35.94.145.5:8000/docs")
+    
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        reload=False
+    )
